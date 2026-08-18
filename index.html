@@ -8,6 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Derma">
 <meta name="theme-color" content="#2c3728">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="manifest" href="manifest.json">
 <title>Derma — Skin Clarity</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -221,8 +224,44 @@
     border-radius: 9px; font-size: 18px; color: var(--moss-deep); cursor: pointer;
   }
   .dn-btn:disabled { opacity: 0.3; }
-  .dn-label { font-weight: 600; font-size: 13.5px; }
+  .dn-btn.dn-cal { background: var(--moss-deep); color: var(--white); font-size: 14px; }
+  .dn-btn.dn-cal.open { background: var(--clay); }
+  .dn-label { font-weight: 600; font-size: 13.5px; background: none; border: none; font-family: 'Inter', sans-serif; color: var(--ink); cursor: pointer; padding: 4px 6px; }
   .dn-label .backfill { display: block; font-size: 10px; color: var(--clay); font-weight: 500; text-align: center; }
+  .dn-label .hint { display: block; font-size: 9.5px; color: var(--muted); font-weight: 400; text-align: center; }
+
+  /* Week strip */
+  .weekstrip { display: flex; gap: 5px; margin-top: 8px; }
+  .ws-day {
+    flex: 1; border: 1px solid var(--line); background: var(--white);
+    border-radius: 10px; padding: 7px 0 5px; text-align: center;
+    cursor: pointer; font-family: 'Inter', sans-serif;
+  }
+  .ws-day .wd { font-size: 9px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.04em; }
+  .ws-day .dn { font-size: 14px; font-weight: 600; margin-top: 1px; color: var(--ink); }
+  .ws-day .mark { width: 5px; height: 5px; border-radius: 50%; margin: 3px auto 0; background: transparent; }
+  .ws-day.logged .mark { background: var(--moss); }
+  .ws-day.sel { background: var(--moss-deep); border-color: var(--moss-deep); }
+  .ws-day.sel .wd, .ws-day.sel .dn { color: var(--white); }
+  .ws-day.sel.logged .mark { background: #d9c9a8; }
+  .ws-day.future { opacity: 0.35; pointer-events: none; }
+
+  /* Month calendar */
+  .cal { background: var(--white); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-top: 8px; }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .cal-month { font-weight: 600; font-size: 13.5px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .cal-grid .hd { font-size: 9px; text-transform: uppercase; color: var(--muted); text-align: center; padding: 4px 0; }
+  .cal-cell {
+    aspect-ratio: 1; border: none; background: none; border-radius: 9px;
+    font-family: 'Inter', sans-serif; font-size: 12.5px; color: var(--ink);
+    cursor: pointer; position: relative;
+  }
+  .cal-cell:disabled { color: #c9c4b6; cursor: default; }
+  .cal-cell.logged::after { content: ''; position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); width: 4px; height: 4px; border-radius: 50%; background: var(--moss); }
+  .cal-cell.sel { background: var(--moss-deep); color: var(--white); font-weight: 600; }
+  .cal-cell.today-cell { outline: 1.5px solid var(--moss); outline-offset: -1.5px; }
+  .cal-legend { font-size: 10px; color: var(--muted); text-align: center; margin-top: 8px; }
 
   /* Insights */
   .weekbar { display: flex; align-items: flex-end; gap: 5px; height: 90px; padding: 4px 2px 0; }
@@ -260,8 +299,19 @@
   <div class="panel active" id="panel-today">
     <div class="datenav">
       <button class="dn-btn" id="dnPrev">‹</button>
-      <div class="dn-label" id="dnLabel"></div>
+      <button class="dn-label" id="dnLabel"></button>
+      <button class="dn-btn dn-cal" id="dnCal" title="Open calendar">▦</button>
       <button class="dn-btn" id="dnNext">›</button>
+    </div>
+    <div class="weekstrip" id="weekStrip"></div>
+    <div class="cal" id="cal" style="display:none;">
+      <div class="cal-head">
+        <button class="dn-btn" id="calPrev">‹</button>
+        <div class="cal-month" id="calMonth"></div>
+        <button class="dn-btn" id="calNext">›</button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="cal-legend">· = logged &nbsp;&nbsp; outlined = today &nbsp;&nbsp; plan: 16 Aug – 5 Dec</div>
     </div>
     <div id="todayContent"></div>
   </div>
@@ -381,6 +431,60 @@ function save() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(days)); } catch (e) {}
 }
 
+let calOpen = false;
+let calMonthDate = null; // Date object anchored to 1st of shown month
+
+function renderWeekStrip() {
+  const sel = new Date(viewDate + 'T00:00:00');
+  const dow = sel.getDay(); // week containing selected date, Sun-start
+  const weekStart = new Date(sel); weekStart.setDate(sel.getDate() - dow);
+  const today = todayStr();
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
+    const iso = d.toISOString().split('T')[0];
+    const future = iso > today;
+    const logged = !!days[iso];
+    html += `<button class="ws-day ${iso === viewDate ? 'sel' : ''} ${logged ? 'logged' : ''} ${future ? 'future' : ''}" onclick="jumpTo('${iso}')">
+      <div class="wd">${d.toLocaleDateString('en-GB', { weekday: 'short' }).slice(0,2)}</div>
+      <div class="dn">${d.getDate()}</div>
+      <div class="mark"></div>
+    </button>`;
+  }
+  document.getElementById('weekStrip').innerHTML = html;
+}
+
+function renderCal() {
+  const el = document.getElementById('cal');
+  el.style.display = calOpen ? 'block' : 'none';
+  if (!calOpen) return;
+  if (!calMonthDate) {
+    const v = new Date(viewDate + 'T00:00:00');
+    calMonthDate = new Date(v.getFullYear(), v.getMonth(), 1);
+  }
+  const y = calMonthDate.getFullYear(), mo = calMonthDate.getMonth();
+  document.getElementById('calMonth').textContent = calMonthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
+  const today = todayStr();
+  const firstDow = new Date(y, mo, 1).getDay();
+  const daysInMonth = new Date(y, mo + 1, 0).getDate();
+  let html = ['Su','Mo','Tu','We','Th','Fr','Sa'].map(h => `<div class="hd">${h}</div>`).join('');
+  for (let i = 0; i < firstDow; i++) html += '<div></div>';
+  for (let dd = 1; dd <= daysInMonth; dd++) {
+    const iso = `${y}-${String(mo+1).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+    const disabled = iso > today;
+    html += `<button class="cal-cell ${days[iso] ? 'logged' : ''} ${iso === viewDate ? 'sel' : ''} ${iso === today ? 'today-cell' : ''}"
+      ${disabled ? 'disabled' : ''} onclick="jumpTo('${iso}')">${dd}</button>`;
+  }
+  document.getElementById('calGrid').innerHTML = html;
+}
+
+function jumpTo(iso) {
+  viewDate = iso;
+  calOpen = false;
+  renderToday();
+}
+
 function getDay(date) {
   if (!days[date]) days[date] = { steps: {}, reaction: 'none' };
   return days[date];
@@ -433,9 +537,13 @@ function renderToday() {
 
   document.getElementById('dnLabel').innerHTML =
     (isToday ? 'Today · ' : '') + fmt(date) +
-    (!isToday ? '<span class="backfill">logging a past date</span>' : '');
-  document.getElementById('dnPrev').disabled = date <= APP_START;
+    (!isToday ? '<span class="backfill">past date — tap to return to today</span>' : '');
+  document.getElementById('dnPrev').disabled = false;
   document.getElementById('dnNext').disabled = isToday;
+  const calBtn = document.getElementById('dnCal');
+  if (calBtn.classList) calBtn.classList[calOpen ? 'add' : 'remove']('open');
+  renderWeekStrip();
+  renderCal();
 
   const stepHtml = (s) => `
     <div class="step">
@@ -601,8 +709,18 @@ function renderInsights() {
   el.innerHTML = lines.map(l => `<div class="insight-line ${l.warn ? 'warn' : ''}"><div class="dot-ic"></div><div>${l.t}</div></div>`).join('');
 }
 
-document.getElementById('dnPrev').addEventListener('click', () => { viewDate = shiftDate(viewDate, -1); renderToday(); });
-document.getElementById('dnNext').addEventListener('click', () => { viewDate = shiftDate(viewDate, 1); renderToday(); });
+document.getElementById('dnPrev').addEventListener('click', () => { viewDate = shiftDate(viewDate, -1); calMonthDate = null; renderToday(); });
+document.getElementById('dnNext').addEventListener('click', () => { if (viewDate < todayStr()) { viewDate = shiftDate(viewDate, 1); calMonthDate = null; renderToday(); } });
+document.getElementById('dnLabel').addEventListener('click', () => {
+  if (viewDate !== todayStr()) { jumpTo(todayStr()); calMonthDate = null; }
+});
+document.getElementById('dnCal').addEventListener('click', () => {
+  calOpen = !calOpen;
+  calMonthDate = null;
+  renderToday();
+});
+document.getElementById('calPrev').addEventListener('click', () => { calMonthDate = new Date(calMonthDate.getFullYear(), calMonthDate.getMonth() - 1, 1); renderCal(); });
+document.getElementById('calNext').addEventListener('click', () => { calMonthDate = new Date(calMonthDate.getFullYear(), calMonthDate.getMonth() + 1, 1); renderCal(); });
 
 document.getElementById('exportBtn').addEventListener('click', () => {
   document.getElementById('dataBox').value = JSON.stringify(days, null, 1);
